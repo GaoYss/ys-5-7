@@ -1,0 +1,17 @@
+{
+  "name": "milk-tea-loyalty-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.2",
+    "vite": "^8.0.16",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {}
+}

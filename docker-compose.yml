@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: milk-tea-loyalty-backend
+    environment:
+      LOYALTY_DATABASE_URL: /app/data/loyalty.db
+      LOYALTY_CORS_ORIGINS: '["http://localhost:19173","http://127.0.0.1:19173"]'
+    ports:
+      - "19080:8000"
+    volumes:
+      - backend-data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: milk-tea-loyalty-frontend
+    environment:
+      VITE_API_BASE: http://localhost:19080/api
+    ports:
+      - "19173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
