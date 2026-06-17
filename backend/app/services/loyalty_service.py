@@ -9,6 +9,9 @@ class LoyaltyService:
     def __init__(self, repo: LoyaltyRepository | None = None) -> None:
         self.repo = repo or LoyaltyRepository()
 
+    def _ensure_member_points_fresh(self, member_id: int) -> None:
+        self.repo.expire_member_points(member_id)
+
     def _normalize_member(self, member: dict) -> dict:
         normalized = dict(member)
         benefits = normalized.get("benefits") or ""
@@ -41,7 +44,11 @@ class LoyaltyService:
         return self._normalize_member(refreshed)
 
     def list_members(self) -> list[dict]:
-        return [self._normalize_member(member) for member in self.repo.list_members()]
+        raw_members = self.repo.list_members()
+        for member in raw_members:
+            self._ensure_member_points_fresh(member["id"])
+        fresh_members = self.repo.list_members()
+        return [self._normalize_member(member) for member in fresh_members]
 
     def create_member(self, name: str, phone: str, birthday: str) -> dict:
         try:
@@ -56,6 +63,7 @@ class LoyaltyService:
             raise HTTPException(status_code=409, detail="手机号已存在或会员创建失败") from exc
 
     def get_member_or_404(self, member_id: int) -> dict:
+        self._ensure_member_points_fresh(member_id)
         member = self.repo.get_member(member_id)
         if member is None:
             raise HTTPException(status_code=404, detail="会员不存在")
@@ -93,14 +101,26 @@ class LoyaltyService:
         return self.repo.list_gifts()
 
     def redeem_gift(self, member_id: int, gift_id: int) -> dict:
+        expired_unprocessed = self.repo.get_member_expired_unprocessed_points(member_id)
         member = self.get_member_or_404(member_id)
         gift = self.repo.get_gift(gift_id)
         if gift is None or not gift["active"]:
             raise HTTPException(status_code=404, detail="礼品不存在或不可兑换")
         if gift["stock"] <= 0:
             raise HTTPException(status_code=400, detail="礼品库存不足")
-        if member["points"] < gift["points_cost"]:
-            raise HTTPException(status_code=400, detail="会员积分不足")
+
+        available_points = self.repo.get_member_available_points(member_id)
+
+        if available_points < gift["points_cost"]:
+            if expired_unprocessed > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"可用积分不足。实际可用 {available_points} 积分，需 {gift['points_cost']} 积分（另有 {expired_unprocessed} 积分已过期）",
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=f"积分不足。当前可用 {available_points} 积分，需 {gift['points_cost']} 积分",
+            )
 
         consumed, consumed_batches = self.repo.consume_points_fifo(
             member_id, gift["points_cost"]
@@ -108,7 +128,7 @@ class LoyaltyService:
         if consumed == 0:
             raise HTTPException(status_code=400, detail="可用积分不足，部分积分可能已过期")
 
-        new_points = member["points"] - gift["points_cost"]
+        new_points = self.repo.get_member_available_points(member_id)
         self.repo.update_member_points(member_id, new_points)
         self.repo.reduce_gift_stock(gift_id)
 
@@ -136,7 +156,12 @@ class LoyaltyService:
     def issue_birthday_vouchers(self, today: date | None = None) -> list[dict]:
         today = today or date.today()
         issued = []
-        for member in self.repo.list_members():
+        for raw_member in self.repo.list_members():
+            self._ensure_member_points_fresh(raw_member["id"])
+            member = self.repo.get_member(raw_member["id"])
+            if member is None:
+                continue
+
             birthday = datetime.strptime(member["birthday"], "%Y-%m-%d").date()
             if birthday.month != today.month or birthday.day != today.day:
                 continue
@@ -171,7 +196,7 @@ class LoyaltyService:
         return self.repo.list_transactions(member_id)
 
     def dashboard(self) -> dict:
-        members = self.repo.list_members()
+        fresh_members = self.list_members()
         gifts = self.repo.list_gifts()
         vouchers = self.repo.list_vouchers()
 
@@ -181,8 +206,8 @@ class LoyaltyService:
             expiring_members = self.repo.get_expiring_soon_members(rule["reminder_days"])
 
         return {
-            "members_count": len(members),
-            "total_points": sum(member["points"] for member in members),
+            "members_count": len(fresh_members),
+            "total_points": sum(member["points"] for member in fresh_members),
             "gifts_count": len([gift for gift in gifts if gift["active"]]),
             "active_vouchers": len([voucher for voucher in vouchers if voucher["status"] == "unused"]),
             "expiring_soon_members": len(expiring_members),
