@@ -247,7 +247,7 @@ class LoyaltyRepository:
                 rows = conn.execute(
                     """
                     SELECT pb.*, m.name AS member_name,
-                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                           CAST(julianday(date(expires_at)) - julianday(date('now')) AS INTEGER) AS days_until_expiry
                     FROM point_batches pb
                     JOIN members m ON m.id = pb.member_id
                     WHERE pb.member_id = ?
@@ -259,10 +259,11 @@ class LoyaltyRepository:
                 rows = conn.execute(
                     """
                     SELECT pb.*, m.name AS member_name,
-                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                           CAST(julianday(date(expires_at)) - julianday(date('now')) AS INTEGER) AS days_until_expiry
                     FROM point_batches pb
                     JOIN members m ON m.id = pb.member_id
                     WHERE pb.member_id = ? AND pb.expired = 0 AND pb.remaining_points > 0
+                      AND date(pb.expires_at) > date('now')
                     ORDER BY pb.expires_at ASC
                     """,
                     (member_id,),
@@ -282,7 +283,7 @@ class LoyaltyRepository:
                 rows = conn.execute(
                     """
                     SELECT pb.*, m.name AS member_name,
-                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                           CAST(julianday(date(expires_at)) - julianday(date('now')) AS INTEGER) AS days_until_expiry
                     FROM point_batches pb
                     JOIN members m ON m.id = pb.member_id
                     ORDER BY pb.expires_at ASC
@@ -293,10 +294,11 @@ class LoyaltyRepository:
                 rows = conn.execute(
                     """
                     SELECT pb.*, m.name AS member_name,
-                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                           CAST(julianday(date(expires_at)) - julianday(date('now')) AS INTEGER) AS days_until_expiry
                     FROM point_batches pb
                     JOIN members m ON m.id = pb.member_id
                     WHERE pb.expired = 0 AND pb.remaining_points > 0
+                      AND date(pb.expires_at) > date('now')
                     ORDER BY pb.expires_at ASC
                     LIMIT 100
                     """
@@ -319,7 +321,7 @@ class LoyaltyRepository:
                 WHERE member_id = ?
                   AND expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') > 0
+                  AND date(expires_at) > date('now')
                 ORDER BY expires_at ASC
                 """,
                 (member_id,),
@@ -370,12 +372,13 @@ class LoyaltyRepository:
                     SUM(pb.remaining_points) AS expiring_points,
                     COUNT(*) AS batch_count,
                     MIN(pb.expires_at) AS earliest_expiry_date,
-                    MIN(julianday(pb.expires_at) - julianday('now')) AS days_until_expiry
+                    MIN(CAST(julianday(date(pb.expires_at)) - julianday(date('now')) AS INTEGER)) AS days_until_expiry
                 FROM point_batches pb
                 JOIN members m ON m.id = pb.member_id
                 WHERE pb.expired = 0
                   AND pb.remaining_points > 0
-                  AND julianday(pb.expires_at) - julianday('now') <= ?
+                  AND date(pb.expires_at) > date('now')
+                  AND date(pb.expires_at) <= date('now', '+' || ? || ' days')
                 GROUP BY m.id, m.name
                 ORDER BY days_until_expiry ASC
                 """,
@@ -401,13 +404,14 @@ class LoyaltyRepository:
                     SUM(pb.remaining_points) AS expiring_points,
                     COUNT(*) AS batch_count,
                     MIN(pb.expires_at) AS earliest_expiry_date,
-                    MIN(julianday(pb.expires_at) - julianday('now')) AS days_until_expiry
+                    MIN(CAST(julianday(date(pb.expires_at)) - julianday(date('now')) AS INTEGER)) AS days_until_expiry
                 FROM point_batches pb
                 JOIN members m ON m.id = pb.member_id
                 WHERE pb.member_id = ?
                   AND pb.expired = 0
                   AND pb.remaining_points > 0
-                  AND julianday(pb.expires_at) - julianday('now') <= ?
+                  AND date(pb.expires_at) > date('now')
+                  AND date(pb.expires_at) <= date('now', '+' || ? || ' days')
                 GROUP BY m.id, m.name
                 """,
                 (member_id, reminder_days),
@@ -429,7 +433,7 @@ class LoyaltyRepository:
                 WHERE pb.member_id = ?
                   AND pb.expired = 0
                   AND pb.remaining_points > 0
-                  AND julianday(pb.expires_at) - julianday('now') <= 0
+                  AND date(pb.expires_at) <= date('now')
                 ORDER BY pb.expires_at ASC
                 """,
                 (member_id,),
@@ -458,7 +462,7 @@ class LoyaltyRepository:
                 WHERE member_id = ?
                   AND expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') > 0
+                  AND date(expires_at) > date('now')
                 """,
                 (member_id,),
             ).fetchone()
@@ -502,7 +506,7 @@ class LoyaltyRepository:
                 JOIN members m ON m.id = pb.member_id
                 WHERE pb.expired = 0
                   AND pb.remaining_points > 0
-                  AND julianday(pb.expires_at) - julianday('now') <= 0
+                  AND date(pb.expires_at) <= date('now')
                 ORDER BY pb.member_id, pb.expires_at ASC
                 """
             ).fetchall()
@@ -516,7 +520,7 @@ class LoyaltyRepository:
                 SET expired = 1, remaining_points = 0
                 WHERE expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') <= 0
+                  AND date(expires_at) <= date('now')
                 """
             )
 
@@ -543,7 +547,7 @@ class LoyaltyRepository:
                 FROM point_batches
                 WHERE expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') > 0
+                  AND date(expires_at) > date('now')
                 GROUP BY member_id
                 """
             ).fetchall()
@@ -593,7 +597,7 @@ class LoyaltyRepository:
                 WHERE member_id = ?
                   AND expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') > 0
+                  AND date(expires_at) > date('now')
                 """,
                 (member_id,),
             ).fetchone()
@@ -608,7 +612,7 @@ class LoyaltyRepository:
                 WHERE member_id = ?
                   AND expired = 0
                   AND remaining_points > 0
-                  AND julianday(expires_at) - julianday('now') <= 0
+                  AND date(expires_at) <= date('now')
                 """,
                 (member_id,),
             ).fetchone()

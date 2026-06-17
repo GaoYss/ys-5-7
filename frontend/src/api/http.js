@@ -10,8 +10,14 @@ async function request(path, options = {}) {
   })
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: '请求失败' }))
-    throw new Error(error.detail || '请求失败')
+    const data = await response.json().catch(() => ({}))
+    const detail = data.detail || {}
+    const message = typeof detail === 'string' ? detail : (detail.message || '请求失败')
+    const error = new Error(message)
+    if (typeof detail === 'object' && detail !== null) {
+      Object.assign(error, detail)
+    }
+    throw error
   }
 
   return response.json()

@@ -102,9 +102,27 @@ class LoyaltyService:
         member = self.get_member_or_404(member_id)
         gift = self.repo.get_gift(gift_id)
         if gift is None or not gift["active"]:
-            raise HTTPException(status_code=404, detail="礼品不存在或不可兑换")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "gift_not_found",
+                    "message": "礼品不存在或不可兑换",
+                    "available_points": self.repo.get_member_available_points(member_id),
+                    "needed_points": 0,
+                    "expired_points": 0,
+                },
+            )
         if gift["stock"] <= 0:
-            raise HTTPException(status_code=400, detail="礼品库存不足")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "stock_empty",
+                    "message": "礼品库存不足",
+                    "available_points": self.repo.get_member_available_points(member_id),
+                    "needed_points": gift["points_cost"],
+                    "expired_points": 0,
+                },
+            )
 
         available_points = self.repo.get_member_available_points(member_id)
 
@@ -112,18 +130,39 @@ class LoyaltyService:
             if expired_unprocessed > 0:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"可用积分不足。实际可用 {available_points} 积分，需 {gift['points_cost']} 积分（另有 {expired_unprocessed} 积分已过期）",
+                    detail={
+                        "error": "points_insufficient_with_expired",
+                        "message": f"可用积分不足。实际可用 {available_points} 积分，需 {gift['points_cost']} 积分（另有 {expired_unprocessed} 积分已过期）",
+                        "available_points": available_points,
+                        "needed_points": gift["points_cost"],
+                        "expired_points": expired_unprocessed,
+                    },
                 )
             raise HTTPException(
                 status_code=400,
-                detail=f"积分不足。当前可用 {available_points} 积分，需 {gift['points_cost']} 积分",
+                detail={
+                    "error": "points_insufficient",
+                    "message": f"积分不足。当前可用 {available_points} 积分，需 {gift['points_cost']} 积分",
+                    "available_points": available_points,
+                    "needed_points": gift["points_cost"],
+                    "expired_points": 0,
+                },
             )
 
         consumed, consumed_batches = self.repo.consume_points_fifo(
             member_id, gift["points_cost"]
         )
         if consumed == 0:
-            raise HTTPException(status_code=400, detail="可用积分不足，部分积分可能已过期")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "consume_failed",
+                    "message": "可用积分不足，部分积分可能已过期",
+                    "available_points": self.repo.get_member_available_points(member_id),
+                    "needed_points": gift["points_cost"],
+                    "expired_points": 0,
+                },
+            )
 
         new_points = self.repo.get_member_available_points(member_id)
         self.repo.update_member_points(member_id, new_points)
