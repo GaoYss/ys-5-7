@@ -83,8 +83,13 @@ export function useLoyaltyData() {
       await refreshAll()
     },
     async redeemGift(payload) {
-      await run(() => loyaltyApi.redeemGift(payload), '礼品已兑换')
-      await refreshAll()
+      try {
+        await run(() => loyaltyApi.redeemGift(payload), '礼品已兑换')
+        await refreshAll()
+      } catch (e) {
+        await refreshAll()
+        throw e
+      }
     },
     async issueBirthdayVouchers() {
       const vouchers = await run(() => loyaltyApi.issueBirthdayVouchers(), '生日礼券发放完成')

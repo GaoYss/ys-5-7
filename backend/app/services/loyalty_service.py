@@ -44,11 +44,8 @@ class LoyaltyService:
         return self._normalize_member(refreshed)
 
     def list_members(self) -> list[dict]:
-        raw_members = self.repo.list_members()
-        for member in raw_members:
-            self._ensure_member_points_fresh(member["id"])
-        fresh_members = self.repo.list_members()
-        return [self._normalize_member(member) for member in fresh_members]
+        self.repo.expire_points()
+        return [self._normalize_member(member) for member in self.repo.list_members()]
 
     def create_member(self, name: str, phone: str, birthday: str) -> dict:
         try:
@@ -155,13 +152,9 @@ class LoyaltyService:
 
     def issue_birthday_vouchers(self, today: date | None = None) -> list[dict]:
         today = today or date.today()
+        self.repo.expire_points()
         issued = []
-        for raw_member in self.repo.list_members():
-            self._ensure_member_points_fresh(raw_member["id"])
-            member = self.repo.get_member(raw_member["id"])
-            if member is None:
-                continue
-
+        for member in self.repo.list_members():
             birthday = datetime.strptime(member["birthday"], "%Y-%m-%d").date()
             if birthday.month != today.month or birthday.day != today.day:
                 continue
@@ -196,7 +189,8 @@ class LoyaltyService:
         return self.repo.list_transactions(member_id)
 
     def dashboard(self) -> dict:
-        fresh_members = self.list_members()
+        self.repo.expire_points()
+        members = self.repo.list_members()
         gifts = self.repo.list_gifts()
         vouchers = self.repo.list_vouchers()
 
@@ -206,8 +200,8 @@ class LoyaltyService:
             expiring_members = self.repo.get_expiring_soon_members(rule["reminder_days"])
 
         return {
-            "members_count": len(fresh_members),
-            "total_points": sum(member["points"] for member in fresh_members),
+            "members_count": len(members),
+            "total_points": sum(member["points"] for member in members),
             "gifts_count": len([gift for gift in gifts if gift["active"]]),
             "active_vouchers": len([voucher for voucher in vouchers if voucher["status"] == "unused"]),
             "expiring_soon_members": len(expiring_members),

@@ -494,24 +494,95 @@ class LoyaltyRepository:
         with get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
 
-            rows = conn.execute(
+            expired_rows = conn.execute(
                 """
-                SELECT DISTINCT pb.member_id
+                SELECT pb.id AS batch_id, pb.member_id, pb.remaining_points,
+                       pb.expires_at, m.name AS member_name
                 FROM point_batches pb
+                JOIN members m ON m.id = pb.member_id
                 WHERE pb.expired = 0
                   AND pb.remaining_points > 0
                   AND julianday(pb.expires_at) - julianday('now') <= 0
+                ORDER BY pb.member_id, pb.expires_at ASC
                 """
             ).fetchall()
 
-            member_ids = [row["member_id"] for row in rows]
+            if not expired_rows:
+                return []
 
-        results = []
-        for mid in member_ids:
-            result = self.expire_member_points(mid)
-            if result:
-                results.append(result)
-        return results
+            conn.execute(
+                """
+                UPDATE point_batches
+                SET expired = 1, remaining_points = 0
+                WHERE expired = 0
+                  AND remaining_points > 0
+                  AND julianday(expires_at) - julianday('now') <= 0
+                """
+            )
+
+            member_expired = {}
+            for row in expired_rows:
+                mid = row["member_id"]
+                if mid not in member_expired:
+                    member_expired[mid] = {
+                        "member_id": mid,
+                        "member_name": row["member_name"],
+                        "expired_points": 0,
+                        "batch_count": 0,
+                        "details": [],
+                    }
+                member_expired[mid]["expired_points"] += row["remaining_points"]
+                member_expired[mid]["batch_count"] += 1
+                member_expired[mid]["details"].append(
+                    (row["remaining_points"], row["expires_at"])
+                )
+
+            active_rows = conn.execute(
+                """
+                SELECT member_id, COALESCE(SUM(remaining_points), 0) AS active_total
+                FROM point_batches
+                WHERE expired = 0
+                  AND remaining_points > 0
+                  AND julianday(expires_at) - julianday('now') > 0
+                GROUP BY member_id
+                """
+            ).fetchall()
+            active_map = {row["member_id"]: row["active_total"] for row in active_rows}
+
+            for mid in member_expired:
+                new_points = active_map.get(mid, 0)
+                member_expired[mid]["new_points"] = new_points
+                conn.execute(
+                    "UPDATE members SET points = ? WHERE id = ?",
+                    (new_points, mid),
+                )
+
+            for mid, info in member_expired.items():
+                for expired_points, expired_date in info["details"]:
+                    conn.execute(
+                        """
+                        INSERT INTO point_transactions (member_id, type, points, note)
+                        VALUES (?, 'expire', ?, ?)
+                        """,
+                        (
+                            mid,
+                            -expired_points,
+                            f"积分过期：{expired_points} 积分已于 {expired_date[:10]} 过期",
+                        ),
+                    )
+
+            results = []
+            for info in member_expired.values():
+                results.append(
+                    {
+                        "member_id": info["member_id"],
+                        "member_name": info["member_name"],
+                        "expired_points": info["expired_points"],
+                        "batch_count": info["batch_count"],
+                        "new_points": info["new_points"],
+                    }
+                )
+            return results
 
     def get_member_available_points(self, member_id: int) -> int:
         with get_connection() as conn:
