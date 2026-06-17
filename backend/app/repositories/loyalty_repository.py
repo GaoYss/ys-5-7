@@ -167,3 +167,298 @@ class LoyaltyRepository:
                 """
             ).fetchall()
             return rows_to_dicts(rows)
+
+    def list_expiration_rules(self) -> list[dict]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM point_expiration_rules ORDER BY id"
+            ).fetchall()
+            return rows_to_dicts(rows)
+
+    def get_expiration_rule(self, rule_id: int) -> dict | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM point_expiration_rules WHERE id = ?",
+                (rule_id,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def get_active_expiration_rule(self) -> dict | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM point_expiration_rules WHERE active = 1 ORDER BY id LIMIT 1"
+            ).fetchone()
+            return row_to_dict(row)
+
+    def create_expiration_rule(
+        self, name: str, description: str, validity_days: int, reminder_days: int
+    ) -> dict:
+        with get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO point_expiration_rules (name, description, validity_days, reminder_days)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, description, validity_days, reminder_days),
+            )
+            rule_id = cursor.lastrowid
+            row = conn.execute(
+                "SELECT * FROM point_expiration_rules WHERE id = ?", (rule_id,)
+            ).fetchone()
+            return row_to_dict(row)
+
+    def update_expiration_rule_status(self, rule_id: int, active: bool) -> None:
+        with get_connection() as conn:
+            if active:
+                conn.execute(
+                    "UPDATE point_expiration_rules SET active = 0 WHERE active = 1"
+                )
+            conn.execute(
+                "UPDATE point_expiration_rules SET active = ? WHERE id = ?",
+                (1 if active else 0, rule_id),
+            )
+
+    def add_point_batch(
+        self,
+        member_id: int,
+        transaction_id: int,
+        points: int,
+        expires_at: str,
+    ) -> dict:
+        with get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO point_batches (member_id, transaction_id, original_points, remaining_points, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (member_id, transaction_id, points, points, expires_at),
+            )
+            batch_id = cursor.lastrowid
+            row = conn.execute(
+                "SELECT * FROM point_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            return row_to_dict(row)
+
+    def get_member_point_batches(
+        self, member_id: int, include_expired: bool = False
+    ) -> list[dict]:
+        with get_connection() as conn:
+            if include_expired:
+                rows = conn.execute(
+                    """
+                    SELECT pb.*, m.name AS member_name,
+                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                    FROM point_batches pb
+                    JOIN members m ON m.id = pb.member_id
+                    WHERE pb.member_id = ?
+                    ORDER BY pb.expires_at ASC
+                    """,
+                    (member_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT pb.*, m.name AS member_name,
+                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                    FROM point_batches pb
+                    JOIN members m ON m.id = pb.member_id
+                    WHERE pb.member_id = ? AND pb.expired = 0 AND pb.remaining_points > 0
+                    ORDER BY pb.expires_at ASC
+                    """,
+                    (member_id,),
+                ).fetchall()
+            batches = rows_to_dicts(rows)
+            for batch in batches:
+                if batch.get("days_until_expiry") is not None:
+                    batch["days_until_expiry"] = int(batch["days_until_expiry"])
+                batch["expired"] = bool(batch["expired"])
+            return batches
+
+    def get_all_point_batches(
+        self, include_expired: bool = False
+    ) -> list[dict]:
+        with get_connection() as conn:
+            if include_expired:
+                rows = conn.execute(
+                    """
+                    SELECT pb.*, m.name AS member_name,
+                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                    FROM point_batches pb
+                    JOIN members m ON m.id = pb.member_id
+                    ORDER BY pb.expires_at ASC
+                    LIMIT 100
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT pb.*, m.name AS member_name,
+                           julianday(expires_at) - julianday('now') AS days_until_expiry
+                    FROM point_batches pb
+                    JOIN members m ON m.id = pb.member_id
+                    WHERE pb.expired = 0 AND pb.remaining_points > 0
+                    ORDER BY pb.expires_at ASC
+                    LIMIT 100
+                    """
+                ).fetchall()
+            batches = rows_to_dicts(rows)
+            for batch in batches:
+                if batch.get("days_until_expiry") is not None:
+                    batch["days_until_expiry"] = int(batch["days_until_expiry"])
+                batch["expired"] = bool(batch["expired"])
+            return batches
+
+    def consume_points_fifo(
+        self, member_id: int, points_to_consume: int
+    ) -> tuple[int, list[dict]]:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT * FROM point_batches
+                WHERE member_id = ? AND expired = 0 AND remaining_points > 0
+                ORDER BY expires_at ASC
+                """,
+                (member_id,),
+            ).fetchall()
+
+            batches = rows_to_dicts(rows)
+            total_available = sum(b["remaining_points"] for b in batches)
+
+            if total_available < points_to_consume:
+                return 0, []
+
+            remaining_needed = points_to_consume
+            consumed_batches = []
+
+            for batch in batches:
+                if remaining_needed <= 0:
+                    break
+
+                consume_from_batch = min(batch["remaining_points"], remaining_needed)
+                new_remaining = batch["remaining_points"] - consume_from_batch
+
+                conn.execute(
+                    "UPDATE point_batches SET remaining_points = ? WHERE id = ?",
+                    (new_remaining, batch["id"]),
+                )
+
+                consumed_batches.append(
+                    {
+                        "batch_id": batch["id"],
+                        "original_points": batch["original_points"],
+                        "consumed_points": consume_from_batch,
+                        "remaining_after": new_remaining,
+                        "expires_at": batch["expires_at"],
+                    }
+                )
+
+                remaining_needed -= consume_from_batch
+
+            return points_to_consume - remaining_needed, consumed_batches
+
+    def get_expiring_soon_members(self, reminder_days: int) -> list[dict]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    m.id AS member_id,
+                    m.name AS member_name,
+                    SUM(pb.remaining_points) AS expiring_points,
+                    COUNT(*) AS batch_count,
+                    MIN(pb.expires_at) AS earliest_expiry_date,
+                    MIN(julianday(pb.expires_at) - julianday('now')) AS days_until_expiry
+                FROM point_batches pb
+                JOIN members m ON m.id = pb.member_id
+                WHERE pb.expired = 0
+                  AND pb.remaining_points > 0
+                  AND julianday(pb.expires_at) - julianday('now') <= ?
+                GROUP BY m.id, m.name
+                ORDER BY days_until_expiry ASC
+                """,
+                (reminder_days,),
+            ).fetchall()
+            reminders = rows_to_dicts(rows)
+            for reminder in reminders:
+                if reminder.get("days_until_expiry") is not None:
+                    reminder["days_until_expiry"] = int(
+                        reminder["days_until_expiry"]
+                    )
+            return reminders
+
+    def get_member_expiring_soon(
+        self, member_id: int, reminder_days: int
+    ) -> dict | None:
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    m.id AS member_id,
+                    m.name AS member_name,
+                    SUM(pb.remaining_points) AS expiring_points,
+                    COUNT(*) AS batch_count,
+                    MIN(pb.expires_at) AS earliest_expiry_date,
+                    MIN(julianday(pb.expires_at) - julianday('now')) AS days_until_expiry
+                FROM point_batches pb
+                JOIN members m ON m.id = pb.member_id
+                WHERE pb.member_id = ?
+                  AND pb.expired = 0
+                  AND pb.remaining_points > 0
+                  AND julianday(pb.expires_at) - julianday('now') <= ?
+                GROUP BY m.id, m.name
+                """,
+                (member_id, reminder_days),
+            ).fetchone()
+            reminder = row_to_dict(row)
+            if reminder and reminder.get("days_until_expiry") is not None:
+                reminder["days_until_expiry"] = int(reminder["days_until_expiry"])
+            return reminder
+
+    def expire_points(self) -> list[dict]:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT pb.*, m.name AS member_name
+                FROM point_batches pb
+                JOIN members m ON m.id = pb.member_id
+                WHERE pb.expired = 0
+                  AND pb.remaining_points > 0
+                  AND julianday(pb.expires_at) - julianday('now') <= 0
+                ORDER BY pb.expires_at ASC
+                """
+            ).fetchall()
+
+            expired_batches = rows_to_dicts(rows)
+            expired_details = []
+
+            for batch in expired_batches:
+                conn.execute(
+                    "UPDATE point_batches SET expired = 1, remaining_points = 0 WHERE id = ?",
+                    (batch["id"],),
+                )
+
+                member = self.get_member(batch["member_id"])
+                if member:
+                    new_points = max(0, member["points"] - batch["remaining_points"])
+                    conn.execute(
+                        "UPDATE members SET points = ? WHERE id = ?",
+                        (new_points, batch["member_id"]),
+                    )
+
+                    self.add_transaction(
+                        batch["member_id"],
+                        "expire",
+                        -batch["remaining_points"],
+                        f"积分过期：{batch['remaining_points']} 积分已于 {batch['expires_at'][:10]} 过期",
+                    )
+
+                    expired_details.append(
+                        {
+                            "member_id": batch["member_id"],
+                            "member_name": batch["member_name"],
+                            "expired_points": batch["remaining_points"],
+                            "expired_at": batch["expires_at"],
+                        }
+                    )
+
+            return expired_details

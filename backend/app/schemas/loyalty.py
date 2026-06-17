@@ -22,6 +22,55 @@ class Member(BaseModel):
     birthday_bonus: int
     benefits: list[str]
     created_at: str
+    expiring_soon_points: int | None = None
+    expiring_soon_count: int | None = None
+    next_expiration_date: str | None = None
+
+
+class PointBatch(BaseModel):
+    id: int
+    member_id: int
+    member_name: str | None = None
+    transaction_id: int | None = None
+    original_points: int
+    remaining_points: int
+    earned_at: str
+    expires_at: str
+    expired: bool
+    days_until_expiry: int | None = None
+
+
+class ExpirationRule(BaseModel):
+    id: int
+    name: str
+    description: str
+    validity_days: int
+    reminder_days: int
+    active: bool
+    created_at: str
+
+
+class ExpirationRuleCreate(BaseModel):
+    name: str
+    description: str
+    validity_days: int
+    reminder_days: int
+
+
+class ExpirationReminder(BaseModel):
+    member_id: int
+    member_name: str
+    expiring_points: int
+    batch_count: int
+    earliest_expiry_date: str
+    days_until_expiry: int
+
+
+class RedeemResult(BaseModel):
+    member: Member
+    transaction: "Transaction"
+    message: str
+    consumed_batches: list[dict] | None = None
 
 
 class MemberCreate(BaseModel):
@@ -85,6 +134,7 @@ class OperationResult(BaseModel):
     transaction: Transaction | None = None
     voucher: Voucher | None = None
     message: str
+    consumed_batches: list[dict] | None = None
 
 
 class Dashboard(BaseModel):
@@ -92,3 +142,8 @@ class Dashboard(BaseModel):
     total_points: int
     gifts_count: int
     active_vouchers: int
+    expiring_soon_members: int | None = None
+    expiring_soon_points: int | None = None
+
+
+RedeemResult.model_rebuild()

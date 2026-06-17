@@ -4,6 +4,14 @@
   font-family:
     Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
   font-size: 16px;
+  --success-bg: #e5f3e5;
+  --success-text: #2f6f3f;
+  --warning-bg: #fff4e0;
+  --warning-text: #b66b00;
+  --danger-bg: #f9dfd8;
+  --danger-text: #a43d2d;
+  --muted-bg: #e8e2db;
+  --muted-text: #6c6258;
 }
 
 * {
@@ -127,7 +135,13 @@ button {
 .metrics-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+@media (max-width: 1200px) {
+  .metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .metric-card,
@@ -209,6 +223,48 @@ select {
 
 .primary-button:hover {
   background: #a94f2c;
+}
+
+.secondary-button {
+  background: #fff;
+  border: 1px solid #d9cbbb;
+  border-radius: 8px;
+  color: #4d463f;
+  font-weight: 700;
+  min-height: 42px;
+  padding: 10px 16px;
+}
+
+.secondary-button:hover {
+  background: #f5f1ea;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #c45f35;
+  font-weight: 700;
+  padding: 4px 8px;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: #a94f2c;
+}
+
+.wide-panel {
+  grid-column: span 1;
+}
+
+textarea {
+  background: #fff;
+  border: 1px solid #d9cbbb;
+  border-radius: 8px;
+  font: inherit;
+  min-height: 42px;
+  padding: 9px 11px;
+  resize: vertical;
+  width: 100%;
 }
 
 .list-table,

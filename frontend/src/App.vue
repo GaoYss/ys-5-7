@@ -4,6 +4,7 @@ import AppShell from './components/AppShell.vue'
 import DashboardView from './views/DashboardView.vue'
 import GiftsView from './views/GiftsView.vue'
 import MembersView from './views/MembersView.vue'
+import PointsExpirationView from './views/PointsExpirationView.vue'
 import TiersView from './views/TiersView.vue'
 import VouchersView from './views/VouchersView.vue'
 
@@ -12,7 +13,8 @@ const tabs = [
   { key: 'members', label: '会员管理', component: MembersView },
   { key: 'gifts', label: '礼品兑换', component: GiftsView },
   { key: 'tiers', label: '等级权益', component: TiersView },
-  { key: 'vouchers', label: '生日礼券', component: VouchersView }
+  { key: 'vouchers', label: '生日礼券', component: VouchersView },
+  { key: 'expiration', label: '积分过期', component: PointsExpirationView }
 ]
 
 const activeTab = ref('dashboard')

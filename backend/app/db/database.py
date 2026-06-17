@@ -65,6 +65,31 @@ CREATE TABLE IF NOT EXISTS vouchers (
     expires_at TEXT NOT NULL,
     FOREIGN KEY (member_id) REFERENCES members(id)
 );
+
+CREATE TABLE IF NOT EXISTS point_expiration_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    validity_days INTEGER NOT NULL,
+    reminder_days INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS point_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    transaction_id INTEGER,
+    original_points INTEGER NOT NULL,
+    remaining_points INTEGER NOT NULL,
+    earned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT NOT NULL,
+    expired INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (member_id) REFERENCES members(id),
+    FOREIGN KEY (transaction_id) REFERENCES point_transactions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_point_batches_member_expires ON point_batches(member_id, expires_at);
 """
 
 
@@ -94,6 +119,19 @@ VALUES
     (1, '林晓茶', '13800000001', '1998-06-14', 860, 3),
     (2, '周芋圆', '13800000002', '1996-11-22', 260, 1),
     (3, '陈波波', '13800000003', '1994-02-08', 1680, 4);
+
+INSERT OR IGNORE INTO point_expiration_rules (id, name, description, validity_days, reminder_days, active)
+VALUES
+    (1, '标准有效期', '积分自获得之日起365天有效，到期前30天提醒。', 365, 30, 1),
+    (2, '活动积分有效期', '活动赠送积分有效期为180天，到期前15天提醒。', 180, 15, 0);
+
+INSERT OR IGNORE INTO point_batches (id, member_id, transaction_id, original_points, remaining_points, earned_at, expires_at)
+VALUES
+    (1, 1, NULL, 500, 500, datetime('now', '-200 days'), datetime('now', '+165 days')),
+    (2, 1, NULL, 360, 360, datetime('now', '-30 days'), datetime('now', '+335 days')),
+    (3, 2, NULL, 260, 260, datetime('now', '-350 days'), datetime('now', '+15 days')),
+    (4, 3, NULL, 1000, 1000, datetime('now', '-100 days'), datetime('now', '+265 days')),
+    (5, 3, NULL, 680, 680, datetime('now', '-20 days'), datetime('now', '+345 days'));
 """
 
 
